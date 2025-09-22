@@ -132,51 +132,6 @@ NON_HEALTHCARE_KEYWORDS = [
     'legal', 'accounting', 'audit', 'tax', 'advisory', 'recruitment',
     'staffing', 'human resources', 'payroll', 'benefits administration'
 ]
-    'sexton', 'atomics', 'curium', 'medtronic', 'catalent', 'delpharm',
-    'veracyte', 'eckert', 'ziegler', 'shine', 'altasciences', 'smiths detection',
-    'onkos', 'biolabs', 'biosystem', 'life molecular', 'cerveau', 'meilleur',
-    'samsung bio', 'agilent', 'pfizer', 'merck', 'roche', 'novartis', 'sanofi',
-    'johnson & johnson', 'j&j', 'gilead', 'amgen', 'biogen', 'regeneron',
-    'vertex', 'moderna', 'biontech', 'astrazeneca', 'eli lilly', 'bristol',
-    'takeda', 'boehringer', 'bayer', 'gsk', 'glaxo', 'novo nordisk',
-    'thermofisher', 'danaher', 'beckman', 'becton', 'bd biosciences',
-    'bio-rad', 'biorad', 'perkin', 'waters', 'shimadzu', 'bruker',
-    'illumina', 'pacific bio', 'nanopore', '10x genomics', 'fluidigm',
-    'nanostring', 'biofire', 'cepheid', 'genmark', 'luminex',
-    'mayo', 'cleveland clinic', 'johns hopkins', 'mount sinai', 'cedars',
-    'kaiser', 'hca healthcare', 'tenet', 'universal health', 'ascension',
-    'memorial', 'methodist', 'presbyterian', 'baptist', 'adventist',
-    'swedish', 'providence', 'dignity', 'commonspirit', 'northwell',
-    'quest diagnostic', 'labcorp', 'sonic healthcare', 'synlab', 'eurofins',
-    'charles river', 'covance', 'ppd', 'icon', 'iqvia', 'syneos',
-    'wuxi', 'lonza', 'samsung biologics', 'boehringer ingelheim',
-    'fresenius', 'baxter', 'boston scientific', 'stryker', 'zimmer',
-    'smith & nephew', 'edwards life', 'intuitive surgical', 'davita'
-]
-
-# Non-healthcare keywords (explicit exclusions)
-NON_HEALTHCARE_KEYWORDS = [
-    'airline', 'airport', 'cargo', 'freight', 'logistic', 'transport',
-    'express', 'disney', 'pictures', 'aviation', 'aircraft', 'aerospace',
-    'volaris', 'easyjet', 'lufthansa', 'delta', 'american airlines',
-    'british airways', 'nippon', 'aeromexico', 'spairliners', 'universal',
-    'paramount', 'productions', 'courier', 'forwarding', 'tmr global',
-    'aeroplex', 'nova traffic', 'ups', 'fedex', 'dhl', 'endeavor air', 
-    'storm aviation', 'adventures', 'hartford', 'tokyo electron', 'slipstick',
-    'sealion production', 'heathrow courier', 'macaronesia', 'exnet service',
-    'mnx global logistics', 'logical freight', 'concesionaria', 'vuela compania',
-    'international marketing', 'apac export', 'mnx apac', 'us export',
-    'shipping', 'warehousing', 'distribution', 'supply chain', 'freight forward',
-    'customs broker', 'import export', 'trading company', 'wholesale',
-    'retail', 'ecommerce', 'amazon', 'walmart', 'target', 'costco',
-    'home depot', 'lowes', 'best buy', 'macys', 'nordstrom', 'gap',
-    'nike', 'adidas', 'under armour', 'lululemon', 'ralph lauren',
-    'automotive', 'ford', 'general motors', 'chrysler', 'tesla', 'toyota',
-    'electronics', 'apple', 'samsung electronics', 'lg electronics', 'sony',
-    'food service', 'restaurant', 'hotel', 'hospitality', 'travel', 'tourism',
-    'entertainment', 'media', 'broadcasting', 'streaming', 'netflix', 'hulu',
-    'banking', 'finance', 'insurance', 'real estate', 'mortgage', 'lending'
-]
 
 CTRL_REGEX = re.compile(r"\b(agent|del\s*agt|delivery\s*agent|customs|warehouse|w/house)\b", re.I)
 
