@@ -36,7 +36,7 @@ st.title("Americas Radiopharma OTP Dashboard")
 # ---------------- Config ----------------
 OTP_TARGET = 95
 
-# Americas Countries (2-letter codes)
+# Americas Countries (2-letter codes) - Comprehensive list
 AMERICAS_COUNTRIES = {
     'US', 'CA', 'MX', 'BR', 'AR', 'CL', 'CO', 'PE', 'VE', 'EC', 'BO', 'PY', 'UY', 
     'GY', 'SR', 'GF', 'FK', 'GT', 'HN', 'NI', 'CR', 'PA', 'SV', 'BZ', 'CU', 'DO', 
@@ -133,6 +133,12 @@ NON_HEALTHCARE_KEYWORDS = [
     'staffing', 'human resources', 'payroll', 'benefits administration'
 ]
 
+# Flexible STATUS matching patterns
+STATUS_PATTERNS = [
+    '440-BILLED', '440 - BILLED', '440BILLED', '440 BILLED',
+    '440-BILL', '440 BILL', 'BILLED-440', 'BILLED 440'
+]
+
 CTRL_REGEX = re.compile(r"\b(agent|del\s*agt|delivery\s*agent|customs|warehouse|w/house)\b", re.I)
 
 # ---------------- Helpers ----------------
@@ -182,6 +188,24 @@ def is_healthcare(account_name, sheet_name=None):
     # Default to False for uncertain cases
     return False
 
+def is_status_billed(status_value):
+    """Check if status matches any variant of 440-BILLED"""
+    if pd.isna(status_value):
+        return False
+    
+    status_clean = str(status_value).strip().upper()
+    
+    # Check against all patterns
+    for pattern in STATUS_PATTERNS:
+        if pattern in status_clean:
+            return True
+    
+    # Also check if it contains '440' and 'BILL' anywhere
+    if '440' in status_clean and 'BILL' in status_clean:
+        return True
+    
+    return False
+
 def make_semi_gauge(title: str, value: float) -> go.Figure:
     """Semi-donut gauge with centered %."""
     v = max(0.0, min(100.0, 0.0 if pd.isna(value) else float(value)))
@@ -224,18 +248,43 @@ def read_and_combine_sheets(uploaded):
             'status_filtered': 0,
             'healthcare_rows': 0,
             'non_healthcare_rows': 0,
-            'by_sheet': {}
+            'by_sheet': {},
+            'data_quality': {},
+            'status_variations': {}
         }
         
         # Process each sheet - READ ALL ROWS
         for sheet_name in all_sheets:
             try:
                 # Read the ENTIRE sheet - no row limits
-                df_sheet = pd.read_excel(uploaded, sheet_name=sheet_name, engine='openpyxl')
+                df_sheet = pd.read_excel(uploaded, sheet_name=sheet_name, engine='openpyxl', 
+                                         na_values=['', 'NA', 'N/A', 'null', 'NULL', 'None'])
                 initial_rows = len(df_sheet)
                 
                 # Remove completely empty rows
                 df_sheet = df_sheet.dropna(how='all')
+                non_empty_rows = len(df_sheet)
+                
+                # Data quality checks
+                data_quality = {
+                    'initial_rows': initial_rows,
+                    'non_empty_rows': non_empty_rows,
+                    'missing_pod': 0,
+                    'missing_status': 0,
+                    'missing_country': 0,
+                    'missing_account': 0
+                }
+                
+                if 'POD DATE/TIME' in df_sheet.columns:
+                    data_quality['missing_pod'] = df_sheet['POD DATE/TIME'].isna().sum()
+                if 'STATUS' in df_sheet.columns:
+                    data_quality['missing_status'] = df_sheet['STATUS'].isna().sum()
+                if 'PU CTRY' in df_sheet.columns:
+                    data_quality['missing_country'] = df_sheet['PU CTRY'].isna().sum()
+                if 'ACCT NM' in df_sheet.columns:
+                    data_quality['missing_account'] = df_sheet['ACCT NM'].isna().sum()
+                
+                stats['data_quality'][sheet_name] = data_quality
                 
                 # Add source sheet for tracking
                 df_sheet['Source_Sheet'] = sheet_name
@@ -244,7 +293,12 @@ def read_and_combine_sheets(uploaded):
                 required_cols = ['PU CTRY', 'STATUS', 'POD DATE/TIME']
                 missing_cols = [col for col in required_cols if col not in df_sheet.columns]
                 if missing_cols:
-                    st.warning(f"Sheet {sheet_name} missing columns: {missing_cols}")
+                    st.warning(f"⚠️ Sheet '{sheet_name}' missing columns: {missing_cols}")
+                
+                # Check STATUS variations before filtering
+                if 'STATUS' in df_sheet.columns:
+                    unique_statuses = df_sheet['STATUS'].value_counts().head(10)
+                    stats['status_variations'][sheet_name] = unique_statuses.to_dict()
                 
                 # Apply country filtering based on sheet type
                 if sheet_name in us_based_sheets:
@@ -254,39 +308,51 @@ def read_and_combine_sheets(uploaded):
                     if 'PU CTRY' in df_sheet_americas.columns:
                         # If PU CTRY is empty, fill with 'US'
                         df_sheet_americas['PU CTRY'] = df_sheet_americas['PU CTRY'].fillna('US')
-                        df_sheet_americas['PU CTRY'] = df_sheet_americas['PU CTRY'].replace('', 'US')
+                        df_sheet_americas.loc[df_sheet_americas['PU CTRY'] == '', 'PU CTRY'] = 'US'
+                        df_sheet_americas.loc[df_sheet_americas['PU CTRY'].str.strip() == '', 'PU CTRY'] = 'US'
                 elif sheet_name in filter_sheets or sheet_name == aviation_sheet:
                     # Clean and standardize PU CTRY
                     if 'PU CTRY' in df_sheet.columns:
                         df_sheet['PU CTRY'] = df_sheet['PU CTRY'].astype(str).str.strip().str.upper()
                         # Filter Americas countries
                         df_sheet_americas = df_sheet[df_sheet['PU CTRY'].isin(AMERICAS_COUNTRIES)]
+                        
+                        # Track non-Americas countries for debugging
+                        non_americas = df_sheet[~df_sheet['PU CTRY'].isin(AMERICAS_COUNTRIES)]
+                        if len(non_americas) > 0:
+                            non_americas_countries = non_americas['PU CTRY'].value_counts().head(5)
+                            st.info(f"📍 {sheet_name}: Excluded {len(non_americas)} non-Americas rows. Top countries: {non_americas_countries.to_dict()}")
                     else:
                         # If no PU CTRY column, include all (assuming they might be Americas)
                         df_sheet_americas = df_sheet
-                        st.warning(f"{sheet_name}: No PU CTRY column, including all rows")
+                        st.warning(f"⚠️ {sheet_name}: No PU CTRY column, including all {len(df_sheet)} rows")
                 else:
                     df_sheet_americas = df_sheet.copy()
                 
                 americas_rows = len(df_sheet_americas)
                 
-                # Filter STATUS = 440-BILLED
+                # Filter STATUS = 440-BILLED with flexible matching
                 if 'STATUS' in df_sheet_americas.columns:
-                    # Handle various status formats
-                    df_sheet_americas['STATUS_CLEAN'] = df_sheet_americas['STATUS'].astype(str).str.strip().str.upper()
-                    df_sheet_final = df_sheet_americas[
-                        df_sheet_americas['STATUS_CLEAN'].str.contains('440-BILLED', na=False, case=False) |
-                        (df_sheet_americas['STATUS_CLEAN'] == '440-BILLED')
-                    ]
+                    # Apply flexible status filtering
+                    df_sheet_americas['Is_Billed'] = df_sheet_americas['STATUS'].apply(is_status_billed)
+                    df_sheet_final = df_sheet_americas[df_sheet_americas['Is_Billed'] == True].copy()
+                    
+                    # Track excluded statuses
+                    excluded_statuses = df_sheet_americas[df_sheet_americas['Is_Billed'] == False]
+                    if len(excluded_statuses) > 0:
+                        excluded_count = len(excluded_statuses)
+                        excluded_examples = excluded_statuses['STATUS'].value_counts().head(5)
+                        st.info(f"📋 {sheet_name}: Excluded {excluded_count} non-440-BILLED rows. Top statuses: {excluded_examples.to_dict()}")
                 else:
                     # If no STATUS column, include all
                     df_sheet_final = df_sheet_americas
-                    st.warning(f"{sheet_name}: No STATUS column, including all Americas rows")
+                    st.warning(f"⚠️ {sheet_name}: No STATUS column, including all {len(df_sheet_americas)} Americas rows")
                 
                 final_rows = len(df_sheet_final)
                 
                 stats['by_sheet'][sheet_name] = {
                     'initial': initial_rows,
+                    'non_empty': non_empty_rows,
                     'americas': americas_rows,
                     'final': final_rows
                 }
@@ -294,11 +360,15 @@ def read_and_combine_sheets(uploaded):
                 # Add to combined data only if there are rows
                 if len(df_sheet_final) > 0:
                     all_data.append(df_sheet_final)
+                    st.success(f"✅ {sheet_name}: Loaded {final_rows:,} rows (from {initial_rows:,} initial)")
+                else:
+                    st.warning(f"⚠️ {sheet_name}: No rows after filtering")
                     
             except Exception as e:
-                st.error(f"Could not read sheet {sheet_name}: {str(e)}")
+                st.error(f"❌ Could not read sheet {sheet_name}: {str(e)}")
                 stats['by_sheet'][sheet_name] = {
                     'initial': 0,
+                    'non_empty': 0,
                     'americas': 0,
                     'final': 0
                 }
@@ -306,9 +376,10 @@ def read_and_combine_sheets(uploaded):
         # Combine all sheets
         if all_data:
             combined_df = pd.concat(all_data, ignore_index=True)
+            st.success(f"🎯 Total combined: {len(combined_df):,} rows from {len(all_data)} sheets")
         else:
             combined_df = pd.DataFrame()
-            st.error("No data found after processing all sheets")
+            st.error("❌ No data found after processing all sheets")
         
         stats['total_rows'] = sum(s['initial'] for s in stats['by_sheet'].values())
         stats['americas_rows'] = sum(s['americas'] for s in stats['by_sheet'].values())
@@ -329,11 +400,26 @@ def read_and_combine_sheets(uploaded):
             
             stats['healthcare_rows'] = len(healthcare_df)
             stats['non_healthcare_rows'] = len(non_healthcare_df)
+            
+            # Track unclassified accounts
+            combined_df['ACCT_NM_CLEAN'] = combined_df['ACCT NM'].astype(str).str.strip()
+            unclassified = combined_df[
+                (combined_df['ACCT_NM_CLEAN'] != '') & 
+                (combined_df['ACCT_NM_CLEAN'] != 'nan') &
+                (~combined_df['ACCT_NM_CLEAN'].str.lower().str.contains('|'.join(HEALTHCARE_KEYWORDS + NON_HEALTHCARE_KEYWORDS)))
+            ]
+            
+            if len(unclassified) > 0:
+                st.info(f"ℹ️ {len(unclassified):,} rows with unrecognized account names (defaulted to non-healthcare)")
+                unclassified_examples = unclassified['ACCT_NM_CLEAN'].value_counts().head(5)
+                st.write("Top unclassified accounts:", unclassified_examples.to_dict())
         
         return healthcare_df, non_healthcare_df, stats
     
     except Exception as e:
-        st.error(f"Error reading file: {str(e)}")
+        st.error(f"❌ Error reading file: {str(e)}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
         return pd.DataFrame(), pd.DataFrame(), {}
 
 # ---------------- Prep (ROW-LEVEL; each row = one entry) ----------------
@@ -358,15 +444,24 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
         # Log how many valid POD dates we have
         valid_pods = d["_pod"].notna().sum()
         total_rows = len(d)
-        if valid_pods < total_rows * 0.5:  # If less than 50% have valid POD
-            st.warning(f"Only {valid_pods} out of {total_rows} rows have valid POD dates")
+        pod_percentage = (valid_pods / total_rows * 100) if total_rows > 0 else 0
+        
+        if pod_percentage < 50:
+            st.warning(f"⚠️ Only {valid_pods:,} out of {total_rows:,} rows ({pod_percentage:.1f}%) have valid POD dates")
+        else:
+            st.info(f"✅ {valid_pods:,} out of {total_rows:,} rows ({pod_percentage:.1f}%) have valid POD dates")
     else:
         d["_pod"] = pd.NaT
-        st.error("POD DATE/TIME column not found!")
+        st.error("❌ POD DATE/TIME column not found!")
     
     # Parse target dates
     target_raw = _get_target_series(d)
     d["_target"] = _excel_to_dt(target_raw) if target_raw is not None else pd.NaT
+    
+    # Log target date validity
+    valid_targets = d["_target"].notna().sum()
+    target_percentage = (valid_targets / total_rows * 100) if total_rows > 0 else 0
+    st.info(f"📅 {valid_targets:,} rows ({target_percentage:.1f}%) have valid target dates for OTP calculation")
 
     # Create month keys from POD - THIS IS THE KEY GROUPING
     # Each POD date gets grouped into its month
@@ -494,6 +589,11 @@ def create_dashboard_view(df: pd.DataFrame, tab_name: str, otp_target: float, de
                     st.success("✅ Monthly volumes add up correctly!")
                 else:
                     st.error("❌ Monthly volume mismatch!")
+                
+                # Date range
+                st.write(f"\n**Date range in data:**")
+                st.write(f"   Earliest POD: {pod_dates['_pod'].min()}")
+                st.write(f"   Latest POD: {pod_dates['_pod'].max()}")
     
     vol_pod, pieces_pod, otp_pod = monthly_frames(processed_df)
     gross_otp, net_otp, volume_total, exceptions, controllables, uncontrollables = calc_summary(processed_df)
@@ -953,8 +1053,9 @@ with st.sidebar:
     
     **Data Scope:**
     - Americas countries only (US, CA, MX, etc.)
-    - STATUS = 440-BILLED
+    - STATUS = 440-BILLED (flexible matching)
     - Month grouping by POD DATE/TIME
+    - Reads ALL rows from ALL 9 sheets
     """)
 
 if not uploaded_file:
@@ -968,15 +1069,16 @@ if not uploaded_file:
     - Optional columns: UPD DEL, QDT, QC NAME, PIECES
     
     **Data processing:**
+    - Reads ALL rows from each sheet (no limits)
     - Filters for Americas countries (US-based sheets don't need country filtering)
-    - Filters for STATUS = 440-BILLED
+    - Filters for STATUS = 440-BILLED (handles variations)
     - Categorizes accounts as Healthcare or Non-Healthcare
     - Calculates OTP metrics by POD month
     """)
     st.stop()
 
 # Process uploaded file
-with st.spinner("Processing Excel file..."):
+with st.spinner("Processing Excel file... Reading ALL rows from ALL sheets..."):
     healthcare_df, non_healthcare_df, stats = read_and_combine_sheets(uploaded_file)
 
 # Detailed validation info
@@ -989,6 +1091,7 @@ if debug_mode:
                 sheet_stats = stats['by_sheet'][sheet_name]
                 st.write(f"   {sheet_name}:")
                 st.write(f"      - Initial: {sheet_stats['initial']:,} rows")
+                st.write(f"      - Non-empty: {sheet_stats.get('non_empty', sheet_stats['initial']):,} rows")
                 st.write(f"      - After Americas filter: {sheet_stats['americas']:,} rows")
                 st.write(f"      - After 440-BILLED filter: {sheet_stats['final']:,} rows")
         
@@ -998,6 +1101,23 @@ if debug_mode:
         st.write("\n**3. Healthcare Classification:**")
         st.write(f"   Healthcare: {stats.get('healthcare_rows', 0):,} rows")
         st.write(f"   Non-Healthcare: {stats.get('non_healthcare_rows', 0):,} rows")
+        
+        # Show data quality metrics
+        if 'data_quality' in stats:
+            st.write("\n**4. Data Quality by Sheet:**")
+            for sheet_name, quality in stats['data_quality'].items():
+                st.write(f"   {sheet_name}:")
+                st.write(f"      - Missing POD: {quality.get('missing_pod', 0):,}")
+                st.write(f"      - Missing STATUS: {quality.get('missing_status', 0):,}")
+                st.write(f"      - Missing Country: {quality.get('missing_country', 0):,}")
+                st.write(f"      - Missing Account: {quality.get('missing_account', 0):,}")
+        
+        # Show STATUS variations found
+        if 'status_variations' in stats:
+            st.write("\n**5. STATUS Variations Found:**")
+            for sheet_name, statuses in stats['status_variations'].items():
+                if statuses:
+                    st.write(f"   {sheet_name}: {list(statuses.keys())[:5]}")
         
         # Show which sheets contribute to each category
         if not healthcare_df.empty and 'Source_Sheet' in healthcare_df.columns:
@@ -1027,7 +1147,7 @@ with st.expander("📈 Data Processing Statistics"):
     if 'by_sheet' in stats:
         st.markdown("#### Breakdown by Sheet:")
         sheet_df = pd.DataFrame(stats['by_sheet']).T
-        sheet_df.columns = ['Initial Rows', 'After Americas Filter', 'After Status Filter']
+        sheet_df.columns = ['Initial Rows', 'Non-Empty Rows', 'After Americas Filter', 'After Status Filter']
         st.dataframe(sheet_df)
         
         # Additional validation
@@ -1051,7 +1171,7 @@ with tab1:
         with st.expander("Sample Healthcare Accounts"):
             if 'ACCT NM' in healthcare_df.columns:
                 unique_accounts = healthcare_df['ACCT NM'].dropna().unique()[:20]
-                st.write(", ".join(unique_accounts))
+                st.write(", ".join([str(acc) for acc in unique_accounts]))
         
         # Debug info
         if debug_mode:
@@ -1080,7 +1200,7 @@ with tab2:
         with st.expander("Sample Non-Healthcare Accounts"):
             if 'ACCT NM' in non_healthcare_df.columns:
                 unique_accounts = non_healthcare_df['ACCT NM'].dropna().unique()[:20]
-                st.write(", ".join(unique_accounts))
+                st.write(", ".join([str(acc) for acc in unique_accounts]))
         
         # Debug info
         if debug_mode:
